@@ -30,15 +30,24 @@ var m2=(rowEl.textContent||'').match(re);
 return m2?m2[0]:null;
 }
 
-function depthPanel(rowEl){
-var p=rowEl.querySelector('.market-depth');
-if(p)return p;
-var sib=rowEl.nextElementSibling;
-if(sib){
-if(sib.classList&&sib.classList.contains('market-depth'))return sib;
-if(sib.querySelector){var q=sib.querySelector('.market-depth');if(q)return q}
+function allLeaves(){
+var a=document.querySelectorAll('*'),o=[];
+for(var i=0;i<a.length;i++){
+var e=a[i];
+if(leaf(e)){var t=(e.textContent||'').trim();if(t){var r=e.getBoundingClientRect();if(onScreen(r))o.push({t:t,top:r.top,left:r.left})}}
 }
-return null;
+return o;
+}
+function sectionText(top,bottom,lvs){var items=[];for(var i=0;i<lvs.length;i++){var l=lvs[i];if(l.top>=top-5&&l.top<bottom)items.push(l)}items.sort(function(a,b){return a.top-b.top||a.left-b.left});return items.map(function(x){return x.t}).join(' ')}
+
+function section(rowEl, allRows){
+var r=rowEl.getBoundingClientRect();
+var nextTop=Infinity;
+for(var j=0;j<allRows.length;j++){if(allRows[j]!==rowEl){var rj=allRows[j].getBoundingClientRect();if(rj.top>r.top&&rj.top<nextTop)nextTop=rj.top}}
+var bottom=Math.min(nextTop,r.top+800);
+var lvs=allLeaves();
+var txt=sectionText(r.top,bottom,lvs);
+return {open:/Prev\.?\s*Close/i.test(txt), txt:txt};
 }
 
 function findS(scope){var a=scope.querySelectorAll('*');for(var i=0;i<a.length;i++){var e=a[i];if(leaf(e)&&(e.textContent||'').trim()==='S'){var r=e.getBoundingClientRect();if(onScreen(r))return e}}return null}
@@ -59,34 +68,35 @@ try{el.click()}catch(e){}
 
 function expiry(sym){var m=sym.match(/(\d{2,3})D(\d{2})(\d{2})(\d{2})-TB/);return m?new Date(2000+ +m[4],+m[3]-1,+m[2]):null}
 
-async function ensureOpen(rowEl){
-if(depthPanel(rowEl))return true;
+async function ensureOpen(rowEl, allRows){
+var info=section(rowEl, allRows);
+if(info.open)return true;
 for(var attempt=0;attempt<2;attempt++){
 var btn=expBtn(rowEl);
 if(!btn)return false;
 tap(btn);
 await sleep(550);
-if(depthPanel(rowEl))return true;
+info=section(rowEl, allRows);
+if(info.open)return true;
 }
 return false;
 }
 
-function extract(rowEl){
+function extract(rowEl, allRows){
 var sym=symText(rowEl);
-var panel=depthPanel(rowEl);
+var info=section(rowEl, allRows);
 var ex=sym?expiry(sym):null,days=null,ask=null,pc=null,y=null,cmp=null;
 if(ex)days=Math.round((ex-new Date())/86400000);
-if(panel){
-var txt=panel.innerText||panel.textContent||'';
-var beforeOpen=txt.split(/\bOpen\b/i)[0];
+if(info.open){
+var beforeOpen=info.txt.split(/\bOpen\b/i)[0];
 var decs=(beforeOpen.match(/\d+\.\d{2}/g)||[]).map(parseFloat);
 if(decs.length>1)ask=decs[1];
-var pcm=txt.match(/Prev\.?\s*Close\s*([\d.]+)/i);
+var pcm=info.txt.match(/Prev\.?\s*Close\s*([\d.]+)/i);
 if(pcm)pc=parseFloat(pcm[1]);
 if(ask!=null&&ask>0&&days>0)y=((100-ask)/ask)*(365/days)*100;
 if(ask!=null&&pc!=null)cmp=ask<pc?'cheaper':ask>pc?'costlier':'same';
 }
-return {sym:sym||'?',days:days,ask:ask,pc:pc,y:y,cmp:cmp,open:!!panel};
+return {sym:sym||'?',days:days,ask:ask,pc:pc,y:y,cmp:cmp,open:info.open};
 }
 
 function render(R){
@@ -109,8 +119,8 @@ if(busy)return;
 busy=true;
 var S=rows();
 if(!S.length){render(null);busy=false;return}
-for(var i=0;i<S.length;i++){await ensureOpen(S[i])}
-var R=S.map(function(r){return extract(r)});
+for(var i=0;i<S.length;i++){await ensureOpen(S[i], S)}
+var R=S.map(function(r){return extract(r, S)});
 R.sort(function(a,b){if(a.y==null&&b.y==null)return 0;if(a.y==null)return 1;if(b.y==null)return-1;return b.y-a.y});
 render(R);
 busy=false;
